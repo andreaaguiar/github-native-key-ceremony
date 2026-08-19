@@ -36,10 +36,35 @@ inputs:
   github-token:
     description: Token used to read this run's job list for the single-deploy guard.
     required: true
+  ceremony-freeze:
+    description: >-
+      Value of the CEREMONY_FREEZE repo variable, read when the calling job
+      starts. Non-empty halts the deploy even after reviewers have approved.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # Second freeze check, and the reason CEREMONY_FREEZE is the stronger switch.
+    # entry-check runs before any reviewer is notified, so it cannot stop a run
+    # that is already approved and waiting to deploy. This step is evaluated when
+    # this job starts, which is after approval, so setting CEREMONY_FREEZE aborts
+    # the ceremony right up to the moment it would sign.
+    # The test is in the script rather than in `if:`, so it does not depend on
+    # which contexts a composite action exposes to a step condition.
+    - name: Refuse to deploy while frozen
+      shell: bash
+      env:
+        FREEZE_REASON: ${{ inputs.ceremony-freeze }}
+      run: |
+        if [ -n "$FREEZE_REASON" ]; then
+          echo "Ceremony frozen after approval: $FREEZE_REASON"
+          echo "No key was reconstructed and no share was rotated."
+          exit 1
+        fi
+        echo "Not frozen; continuing."
+
     # All three pair jobs share one concurrency group, so they run one at a
     # time. Whichever pair reaches a quorum first deploys; the others then find
     # its completed job here and stop. Without this guard, three approvals would

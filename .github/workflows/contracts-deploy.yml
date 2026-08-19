@@ -14,15 +14,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Kill switch: set the CEREMONY_FREEZE repo variable to halt every run.
-  freeze-check:
-    name: freeze check
+  # Two kill switches, evaluated before any reviewer is notified:
+  #   MAINTENANCE      - planned pause. Stops new runs only.
+  #   CEREMONY_FREEZE  - emergency stop. Stops new runs, and is checked again
+  #                      inside the deploy job so it also halts a run that
+  #                      reviewers have already approved.
+  # Freeze is deliberately the stronger of the two: anything it stops,
+  # maintenance stops as well, never the other way round.
+  entry-check:
+    name: entry check
     runs-on: ubuntu-latest
     steps:
-      - name: Refuse to proceed if frozen
-        if: ${{ vars.CEREMONY_FREEZE != '' && vars.CEREMONY_FREEZE != null }}
+      - name: Refuse to start during planned maintenance
+        if: ${{ vars.MAINTENANCE != '' && vars.MAINTENANCE != null }}
         # Passed via env, not interpolated into the script: a repo variable is
         # attacker-controlled input the moment an admin account is compromised.
+        env:
+          MAINTENANCE_REASON: ${{ vars.MAINTENANCE }}
+        run: |
+          echo "Ceremony paused for maintenance: $MAINTENANCE_REASON"
+          exit 1
+      - name: Refuse to start while frozen
+        if: ${{ vars.CEREMONY_FREEZE != '' && vars.CEREMONY_FREEZE != null }}
         env:
           FREEZE_REASON: ${{ vars.CEREMONY_FREEZE }}
         run: |
@@ -34,7 +47,7 @@ jobs:
   # channel.
   reviewer-a:
     name: quorum approval + share A
-    needs: freeze-check
+    needs: entry-check
     runs-on: ubuntu-latest
     environment: reviewer-a
     outputs:
@@ -67,7 +80,7 @@ jobs:
 
   reviewer-b:
     name: quorum approval + share B
-    needs: freeze-check
+    needs: entry-check
     runs-on: ubuntu-latest
     environment: reviewer-b
     outputs:
@@ -100,7 +113,7 @@ jobs:
 
   reviewer-c:
     name: quorum approval + share C
-    needs: freeze-check
+    needs: entry-check
     runs-on: ubuntu-latest
     environment: reviewer-c
     outputs:
@@ -133,7 +146,7 @@ jobs:
 
   deploy-ab:
     name: sepolia (ceremony) — A+B
-    needs: [freeze-check, reviewer-a, reviewer-b]
+    needs: [entry-check, reviewer-a, reviewer-b]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when A+B both approved — and it never
     # references reviewer-c, so it does not wait for that reviewer at all. That is
@@ -168,10 +181,12 @@ jobs:
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
           transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Read when this job starts, so it reflects a freeze set after approval.
+          ceremony-freeze: ${{ vars.CEREMONY_FREEZE }}
 
   deploy-ac:
     name: sepolia (ceremony) — A+C
-    needs: [freeze-check, reviewer-a, reviewer-c]
+    needs: [entry-check, reviewer-a, reviewer-c]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when A+C both approved — and it never
     # references reviewer-b, so it does not wait for that reviewer at all. That is
@@ -206,10 +221,12 @@ jobs:
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
           transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Read when this job starts, so it reflects a freeze set after approval.
+          ceremony-freeze: ${{ vars.CEREMONY_FREEZE }}
 
   deploy-bc:
     name: sepolia (ceremony) — B+C
-    needs: [freeze-check, reviewer-b, reviewer-c]
+    needs: [entry-check, reviewer-b, reviewer-c]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when B+C both approved — and it never
     # references reviewer-a, so it does not wait for that reviewer at all. That is
@@ -244,3 +261,5 @@ jobs:
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
           transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Read when this job starts, so it reflects a freeze set after approval.
+          ceremony-freeze: ${{ vars.CEREMONY_FREEZE }}

@@ -10,7 +10,7 @@ This is a working example, not a slide deck. `contracts/` holds a minimal `GovTo
 - **Split custody.** Each environment also holds one Shamir share (2-of-3) of the deploy key. No environment holds enough to rebuild the key. The key exists in assembled form only in the memory of the deploy job.
 - **Short-lived, rotated keys.** The deploy key is never permanent. Every successful deploy sweeps the remaining ETH of the retiring key forward. It then generates a fresh key, splits it again, and writes one new share to each reviewer environment. A leaked key stays valid only until the next deploy.
 - **Independently verifiable audit trail.** `npm run ceremony:audit` gets the real reviewer-approval history for a given tag directly from GitHub's own API. It does not read a log line that the deploy job wrote about itself.
-- **Emergency freeze.** One repo variable (`CEREMONY_FREEZE`) halts every future run before any reviewer is notified and before any environment is touched.
+- **Two kill switches.** `MAINTENANCE` is a planned pause: it stops a new run before any reviewer is notified. `CEREMONY_FREEZE` is the emergency stop: it does the same, and the deploy job reads it again on start. It therefore also halts a run that reviewers already approved. Neither touches a secret, so neither can fail.
 
 Incident response: [`docs/KEY_COMPROMISE_RUNBOOK.md`](docs/KEY_COMPROMISE_RUNBOOK.md).
 
