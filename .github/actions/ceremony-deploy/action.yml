@@ -1,0 +1,109 @@
+name: Ceremony deploy
+description: >-
+  Reconstructs the deploy key from two reviewer shares, deploys to Sepolia,
+  then rotates the key. Single source of truth for the deploy steps, because
+  three pair jobs call it and they must not drift apart.
+
+inputs:
+  # Exactly two of these three are set. orchestrate.ts collects whichever are
+  # non-empty, so the unused one stays empty rather than being renamed.
+  share-a:
+    description: Share released by reviewer-a, empty when this pair excludes A.
+    required: false
+    default: ""
+  share-b:
+    description: Share released by reviewer-b, empty when this pair excludes B.
+    required: false
+    default: ""
+  share-c:
+    description: Share released by reviewer-c, empty when this pair excludes C.
+    required: false
+    default: ""
+  rpc-url:
+    description: Sepolia JSON-RPC endpoint.
+    required: true
+  etherscan-api-key:
+    description: Etherscan key, used only for best-effort verification.
+    required: true
+  ceremony-admin-token:
+    description: PAT scoped to Environments write, used only to push rotated shares.
+    required: true
+  github-token:
+    description: Token used to read this run's job list for the single-deploy guard.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # All three pair jobs share one concurrency group, so they run one at a
+    # time. Whichever pair reaches a quorum first deploys; the others then find
+    # its completed job here and stop. Without this guard, three approvals would
+    # mean three deploys and three rotations, which would leave the shares
+    # unrecoverable.
+    - name: Stop if another pair already completed the ceremony
+      id: guard
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100"
+        winner=$(curl -sf \
+          -H "Authorization: Bearer $GH_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "$url" \
+          | jq -r '[.jobs[] | select(.name | startswith("sepolia (ceremony)")) | select(.conclusion == "success") | .name] | first // ""')
+        if [ -n "$winner" ]; then
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Ceremony already completed by \"$winner\". This pair is a no-op."
+        else
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Setup Node
+      if: steps.guard.outputs.proceed == 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: contracts/package-lock.json
+
+    - name: Install dependencies
+      if: steps.guard.outputs.proceed == 'true'
+      shell: bash
+      working-directory: contracts
+      run: npm ci --ignore-scripts
+
+    - name: Compile
+      if: steps.guard.outputs.proceed == 'true'
+      shell: bash
+      working-directory: contracts
+      run: npm run compile
+
+    - name: Typecheck
+      if: steps.guard.outputs.proceed == 'true'
+      shell: bash
+      working-directory: contracts
+      run: npm run typecheck
+
+    - name: Reconstruct deploy key, deploy, verify, and rotate
+      if: steps.guard.outputs.proceed == 'true'
+      shell: bash
+      working-directory: contracts
+      env:
+        RPC_URL: ${{ inputs.rpc-url }}
+        ETHERSCAN_API_KEY: ${{ inputs.etherscan-api-key }}
+        SHARE_A: ${{ inputs.share-a }}
+        SHARE_B: ${{ inputs.share-b }}
+        SHARE_C: ${{ inputs.share-c }}
+        CEREMONY_ADMIN_TOKEN: ${{ inputs.ceremony-admin-token }}
+      run: npm run ceremony:deploy
+
+    - name: Upload deployment manifest
+      if: steps.guard.outputs.proceed == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: deployment-${{ github.ref_name }}
+        path: contracts/deployments/sepolia.json
+        if-no-files-found: error

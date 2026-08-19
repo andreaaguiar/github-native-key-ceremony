@@ -41,7 +41,16 @@ jobs:
       share: ${{ steps.release.outputs.share }}
     steps:
       - id: release
-        run: echo "share=$DEPLOY_KEY_SHARE" >> "$GITHUB_OUTPUT"
+        # GitHub drops a job output whose value matches a secret ("Skip output
+        # ... since it may contain secret"), so the share cannot be emitted
+        # verbatim. base64 changes the literal so the output survives; it is
+        # transport framing, NOT encryption, and adds no confidentiality.
+        run: |
+          if [ -z "$DEPLOY_KEY_SHARE" ]; then
+            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+            exit 1
+          fi
+          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
 
@@ -54,7 +63,16 @@ jobs:
       share: ${{ steps.release.outputs.share }}
     steps:
       - id: release
-        run: echo "share=$DEPLOY_KEY_SHARE" >> "$GITHUB_OUTPUT"
+        # GitHub drops a job output whose value matches a secret ("Skip output
+        # ... since it may contain secret"), so the share cannot be emitted
+        # verbatim. base64 changes the literal so the output survives; it is
+        # transport framing, NOT encryption, and adds no confidentiality.
+        run: |
+          if [ -z "$DEPLOY_KEY_SHARE" ]; then
+            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+            exit 1
+          fi
+          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
 
@@ -67,62 +85,126 @@ jobs:
       share: ${{ steps.release.outputs.share }}
     steps:
       - id: release
-        run: echo "share=$DEPLOY_KEY_SHARE" >> "$GITHUB_OUTPUT"
+        # GitHub drops a job output whose value matches a secret ("Skip output
+        # ... since it may contain secret"), so the share cannot be emitted
+        # verbatim. base64 changes the literal so the output survives; it is
+        # transport framing, NOT encryption, and adds no confidentiality.
+        run: |
+          if [ -z "$DEPLOY_KEY_SHARE" ]; then
+            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+            exit 1
+          fi
+          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
 
-  deploy:
-    name: sepolia (ceremony)
-    needs: [freeze-check, reviewer-a, reviewer-b, reviewer-c]
-    # 2-of-3: `needs` alone is an AND, so the threshold lives here. GitHub
-    # expressions have no arithmetic, hence the explicit pairs. This
-    # tolerates a rejection, not silence — a pending approval still blocks.
-    if: >-
-      always() &&
-      needs.freeze-check.result == 'success' &&
-      (
-        (needs['reviewer-a'].result == 'success' && needs['reviewer-b'].result == 'success') ||
-        (needs['reviewer-a'].result == 'success' && needs['reviewer-c'].result == 'success') ||
-        (needs['reviewer-b'].result == 'success' && needs['reviewer-c'].result == 'success')
-      )
+  deploy-ab:
+    name: sepolia (ceremony) — A+B
+    needs: [freeze-check, reviewer-a, reviewer-b]
+    # No `if:` threshold here. A job is skipped when any of its `needs` did not
+    # succeed, so this runs exactly when A+B both approved — and it never
+    # references reviewer-c, so it does not wait for that reviewer at all. That is
+    # what lets two approvals proceed while the third is still pending.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Holds RPC_URL, ETHERSCAN_API_KEY, and CEREMONY_ADMIN_TOKEN (a PAT
     # scoped to Environments:write, used only to push rotated shares back).
     # Deliberately has no reviewers: the human gate is reviewer-a/b/c.
     environment: production
-    defaults:
-      run:
-        working-directory: contracts
+    # Shared by all three pair jobs, so at most one ceremony runs at a time.
+    # The guard inside the composite action then makes the losers no-ops.
+    concurrency:
+      group: ceremony-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # Needed by the guard, which reads this run's job list.
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Deploy ceremony
+        uses: ./.github/actions/ceremony-deploy
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: contracts/package-lock.json
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-      - name: Compile
-        run: npm run compile
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Reconstruct deploy key, deploy, verify, and rotate
-        run: npm run ceremony:deploy
-        env:
-          RPC_URL: ${{ secrets.RPC_URL }}
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          SHARE_A: ${{ needs['reviewer-a'].outputs.share }}
-          SHARE_B: ${{ needs['reviewer-b'].outputs.share }}
-          SHARE_C: ${{ needs['reviewer-c'].outputs.share }}
-          CEREMONY_ADMIN_TOKEN: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
-      - name: Upload deployment manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          share-a: ${{ needs['reviewer-a'].outputs.share }}
+          share-b: ${{ needs['reviewer-b'].outputs.share }}
+          rpc-url: ${{ secrets.RPC_URL }}
+          etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
+          ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-ac:
+    name: sepolia (ceremony) — A+C
+    needs: [freeze-check, reviewer-a, reviewer-c]
+    # No `if:` threshold here. A job is skipped when any of its `needs` did not
+    # succeed, so this runs exactly when A+C both approved — and it never
+    # references reviewer-b, so it does not wait for that reviewer at all. That is
+    # what lets two approvals proceed while the third is still pending.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Holds RPC_URL, ETHERSCAN_API_KEY, and CEREMONY_ADMIN_TOKEN (a PAT
+    # scoped to Environments:write, used only to push rotated shares back).
+    # Deliberately has no reviewers: the human gate is reviewer-a/b/c.
+    environment: production
+    # Shared by all three pair jobs, so at most one ceremony runs at a time.
+    # The guard inside the composite action then makes the losers no-ops.
+    concurrency:
+      group: ceremony-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # Needed by the guard, which reads this run's job list.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: deployment-${{ github.ref_name }}
-          path: contracts/deployments/sepolia.json
-          if-no-files-found: error
+          persist-credentials: false
+      - name: Deploy ceremony
+        uses: ./.github/actions/ceremony-deploy
+        with:
+          share-a: ${{ needs['reviewer-a'].outputs.share }}
+          share-c: ${{ needs['reviewer-c'].outputs.share }}
+          rpc-url: ${{ secrets.RPC_URL }}
+          etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
+          ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-bc:
+    name: sepolia (ceremony) — B+C
+    needs: [freeze-check, reviewer-b, reviewer-c]
+    # No `if:` threshold here. A job is skipped when any of its `needs` did not
+    # succeed, so this runs exactly when B+C both approved — and it never
+    # references reviewer-a, so it does not wait for that reviewer at all. That is
+    # what lets two approvals proceed while the third is still pending.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Holds RPC_URL, ETHERSCAN_API_KEY, and CEREMONY_ADMIN_TOKEN (a PAT
+    # scoped to Environments:write, used only to push rotated shares back).
+    # Deliberately has no reviewers: the human gate is reviewer-a/b/c.
+    environment: production
+    # Shared by all three pair jobs, so at most one ceremony runs at a time.
+    # The guard inside the composite action then makes the losers no-ops.
+    concurrency:
+      group: ceremony-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # Needed by the guard, which reads this run's job list.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Deploy ceremony
+        uses: ./.github/actions/ceremony-deploy
+        with:
+          share-b: ${{ needs['reviewer-b'].outputs.share }}
+          share-c: ${{ needs['reviewer-c'].outputs.share }}
+          rpc-url: ${{ secrets.RPC_URL }}
+          etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
+          ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
