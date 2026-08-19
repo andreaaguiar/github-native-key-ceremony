@@ -40,19 +40,30 @@ jobs:
     outputs:
       share: ${{ steps.release.outputs.share }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: release
-        # GitHub drops a job output whose value matches a secret ("Skip output
-        # ... since it may contain secret"), so the share cannot be emitted
-        # verbatim. base64 changes the literal so the output survives; it is
-        # transport framing, NOT encryption, and adds no confidentiality.
+        # GitHub drops a job output holding a secret, and it registers common
+        # encodings of that secret too — base64 among them. So the share is
+        # encrypted to the transport public key instead: RSA-OAEP ciphertext is
+        # randomised, is not an encoding of the secret, and only the deploy job
+        # can open it.
+        # Assign first: `-e` fires on a failing command substitution in an
+        # assignment, but not inside `echo "$(...)"`, which would emit an empty
+        # share and defer the failure to the deploy job.
         run: |
-          if [ -z "$DEPLOY_KEY_SHARE" ]; then
-            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+          sealed=$(node scripts/ceremony/seal-share.mjs)
+          if [ -z "$sealed" ]; then
+            echo "Sealing produced an empty value; refusing to release this share." >&2
             exit 1
           fi
-          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "share=$sealed" >> "$GITHUB_OUTPUT"
+        working-directory: contracts
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
+          CEREMONY_TRANSPORT_PUBLIC_KEY: ${{ vars.CEREMONY_TRANSPORT_PUBLIC_KEY }}
 
   reviewer-b:
     name: quorum approval + share B
@@ -62,19 +73,30 @@ jobs:
     outputs:
       share: ${{ steps.release.outputs.share }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: release
-        # GitHub drops a job output whose value matches a secret ("Skip output
-        # ... since it may contain secret"), so the share cannot be emitted
-        # verbatim. base64 changes the literal so the output survives; it is
-        # transport framing, NOT encryption, and adds no confidentiality.
+        # GitHub drops a job output holding a secret, and it registers common
+        # encodings of that secret too — base64 among them. So the share is
+        # encrypted to the transport public key instead: RSA-OAEP ciphertext is
+        # randomised, is not an encoding of the secret, and only the deploy job
+        # can open it.
+        # Assign first: `-e` fires on a failing command substitution in an
+        # assignment, but not inside `echo "$(...)"`, which would emit an empty
+        # share and defer the failure to the deploy job.
         run: |
-          if [ -z "$DEPLOY_KEY_SHARE" ]; then
-            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+          sealed=$(node scripts/ceremony/seal-share.mjs)
+          if [ -z "$sealed" ]; then
+            echo "Sealing produced an empty value; refusing to release this share." >&2
             exit 1
           fi
-          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "share=$sealed" >> "$GITHUB_OUTPUT"
+        working-directory: contracts
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
+          CEREMONY_TRANSPORT_PUBLIC_KEY: ${{ vars.CEREMONY_TRANSPORT_PUBLIC_KEY }}
 
   reviewer-c:
     name: quorum approval + share C
@@ -84,19 +106,30 @@ jobs:
     outputs:
       share: ${{ steps.release.outputs.share }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: release
-        # GitHub drops a job output whose value matches a secret ("Skip output
-        # ... since it may contain secret"), so the share cannot be emitted
-        # verbatim. base64 changes the literal so the output survives; it is
-        # transport framing, NOT encryption, and adds no confidentiality.
+        # GitHub drops a job output holding a secret, and it registers common
+        # encodings of that secret too — base64 among them. So the share is
+        # encrypted to the transport public key instead: RSA-OAEP ciphertext is
+        # randomised, is not an encoding of the secret, and only the deploy job
+        # can open it.
+        # Assign first: `-e` fires on a failing command substitution in an
+        # assignment, but not inside `echo "$(...)"`, which would emit an empty
+        # share and defer the failure to the deploy job.
         run: |
-          if [ -z "$DEPLOY_KEY_SHARE" ]; then
-            echo "DEPLOY_KEY_SHARE is not set on this environment." >&2
+          sealed=$(node scripts/ceremony/seal-share.mjs)
+          if [ -z "$sealed" ]; then
+            echo "Sealing produced an empty value; refusing to release this share." >&2
             exit 1
           fi
-          echo "share=$(printf '%s' "$DEPLOY_KEY_SHARE" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "share=$sealed" >> "$GITHUB_OUTPUT"
+        working-directory: contracts
         env:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
+          CEREMONY_TRANSPORT_PUBLIC_KEY: ${{ vars.CEREMONY_TRANSPORT_PUBLIC_KEY }}
 
   deploy-ab:
     name: sepolia (ceremony) — A+B
@@ -133,6 +166,7 @@ jobs:
           rpc-url: ${{ secrets.RPC_URL }}
           etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-ac:
@@ -170,6 +204,7 @@ jobs:
           rpc-url: ${{ secrets.RPC_URL }}
           etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-bc:
@@ -207,4 +242,5 @@ jobs:
           rpc-url: ${{ secrets.RPC_URL }}
           etherscan-api-key: ${{ secrets.ETHERSCAN_API_KEY }}
           ceremony-admin-token: ${{ secrets.CEREMONY_ADMIN_TOKEN }}
+          transport-private-key: ${{ secrets.CEREMONY_TRANSPORT_PRIVATE_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

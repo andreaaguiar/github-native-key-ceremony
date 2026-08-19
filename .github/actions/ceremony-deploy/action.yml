@@ -28,6 +28,11 @@ inputs:
   ceremony-admin-token:
     description: PAT scoped to Environments write, used only to push rotated shares.
     required: true
+  transport-private-key:
+    description: >-
+      Private half of the ceremony transport keypair, used to open the sealed
+      reviewer shares. Not part of the 2-of-3 custody scheme.
+    required: true
   github-token:
     description: Token used to read this run's job list for the single-deploy guard.
     required: true
@@ -98,6 +103,7 @@ runs:
         SHARE_B: ${{ inputs.share-b }}
         SHARE_C: ${{ inputs.share-c }}
         CEREMONY_ADMIN_TOKEN: ${{ inputs.ceremony-admin-token }}
+        CEREMONY_TRANSPORT_PRIVATE_KEY: ${{ inputs.transport-private-key }}
       run: npm run ceremony:deploy
 
     - name: Upload deployment manifest

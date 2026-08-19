@@ -2,7 +2,9 @@ import { expect } from "chai";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { split, combine } from "shamir-secret-sharing";
-import { encodeShare, decodeShare, unwrapTransport } from "../scripts/ceremony/share-codec.js";
+import { encodeShare, decodeShare } from "../scripts/ceremony/share-codec.js";
+import { openShare } from "../scripts/ceremony/transport.js";
+import { generateKeyPairSync } from "node:crypto";
 
 describe("ceremony share wiring", () => {
   it("round-trips a secret through split -> encode -> decode -> combine (2-of-3)", async () => {
@@ -26,28 +28,68 @@ describe("ceremony share wiring", () => {
     expect(() => decodeShare(`  ${encodeShare(share)}\n`)).to.not.throw();
   });
 
-  // The reviewer jobs wrap the share in bash before emitting it as a job output,
-  // because GitHub drops an output whose value matches a secret. This asserts the
-  // TypeScript unwrap matches what that exact shell pipeline produces.
-  it("unwraps a share wrapped by the reviewer job's shell pipeline", async () => {
-    const secret = new Uint8Array(randomBytes(32));
-    const shares = await split(secret, 3, 2);
+  // The reviewer jobs run seal-share.mjs on a bare runner. These tests drive that
+  // exact script, so the workflow and the deploy-side decrypt cannot drift apart.
+  describe("share transport across the job boundary", () => {
+    const keys = () => {
+      const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+        modulusLength: 3072,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      });
+      return {
+        pub: Buffer.from(publicKey).toString("base64"),
+        priv: Buffer.from(privateKey).toString("base64"),
+      };
+    };
 
-    const wrapWithShell = (value: string) =>
-      execFileSync("bash", ["-c", `printf '%s' "$V" | base64 | tr -d '\n'`], {
-        env: { ...process.env, V: value },
+    const seal = (share: string, pub: string) =>
+      execFileSync("node", ["scripts/ceremony/seal-share.mjs"], {
+        env: { ...process.env, DEPLOY_KEY_SHARE: share, CEREMONY_TRANSPORT_PUBLIC_KEY: pub },
       }).toString();
 
-    const rebuilt = await combine(
-      [shares[0], shares[1]]
-        .map(encodeShare)
-        .map(wrapWithShell)
-        .map((w) => decodeShare(unwrapTransport(w))),
-    );
-    expect(Buffer.from(rebuilt)).to.deep.equal(Buffer.from(secret));
-  });
+    it("round-trips every 2-of-3 pair through seal-share.mjs and openShare", async () => {
+      const secret = new Uint8Array(randomBytes(32));
+      const shares = await split(secret, 3, 2);
+      const { pub, priv } = keys();
+      const sealed = shares.map((s) => seal(encodeShare(s), pub));
 
-  it("rejects an empty transport wrapper rather than passing it on", () => {
-    expect(() => unwrapTransport("")).to.throw(/empty deploy-key share/);
+      for (const [i, j] of [[0, 1], [0, 2], [1, 2]] as const) {
+        const opened = [sealed[i], sealed[j]].map((c) => decodeShare(openShare(c, priv)));
+        expect(Buffer.from(await combine(opened))).to.deep.equal(Buffer.from(secret));
+      }
+    });
+
+    it("produces ciphertext that is neither the share nor its base64", async () => {
+      const [share] = await split(new Uint8Array(randomBytes(32)), 3, 2);
+      const plain = encodeShare(share);
+      const { pub } = keys();
+      const sealed = seal(plain, pub);
+
+      expect(sealed).to.not.equal(plain);
+      expect(sealed).to.not.equal(Buffer.from(plain, "utf8").toString("base64"));
+      expect(sealed).to.not.include("\n");
+      // RSA-OAEP is randomised, so the same share seals differently every time.
+      expect(seal(plain, pub)).to.not.equal(sealed);
+    });
+
+    it("refuses a share sealed to a different transport key", async () => {
+      const [share] = await split(new Uint8Array(randomBytes(32)), 3, 2);
+      const sealed = seal(encodeShare(share), keys().pub);
+      expect(() => openShare(sealed, keys().priv)).to.throw();
+    });
+
+    it("rejects a private key that is not a base64-wrapped PEM", () => {
+      expect(() => openShare("Zm9v", Buffer.from("nope").toString("base64"))).to.throw(/not a base64-wrapped PEM/);
+    });
+
+    it("fails when the reviewer environment has no share", () => {
+      expect(() =>
+        execFileSync("node", ["scripts/ceremony/seal-share.mjs"], {
+          env: { ...process.env, DEPLOY_KEY_SHARE: "", CEREMONY_TRANSPORT_PUBLIC_KEY: keys().pub },
+          stdio: "pipe",
+        }),
+      ).to.throw();
+    });
   });
 });

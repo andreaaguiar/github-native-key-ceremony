@@ -5,7 +5,8 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { network } from "hardhat";
 import { split, combine } from "shamir-secret-sharing";
-import { encodeShare, decodeShare, unwrapTransport } from "./share-codec.js";
+import { encodeShare, decodeShare } from "./share-codec.js";
+import { openShare } from "./transport.js";
 import { getRepositoryId, setEnvironmentSecret } from "./github-secrets.js";
 import type { Wallet } from "ethers";
 
@@ -59,7 +60,11 @@ async function main() {
     );
   }
 
-  const shares = rawShares.slice(0, THRESHOLD).map((raw) => decodeShare(unwrapTransport(raw)));
+  const transportKey = process.env.CEREMONY_TRANSPORT_PRIVATE_KEY;
+  if (!transportKey) {
+    throw new Error("CEREMONY_TRANSPORT_PRIVATE_KEY missing: cannot open the reviewer shares.");
+  }
+  const shares = rawShares.slice(0, THRESHOLD).map((raw) => decodeShare(openShare(raw, transportKey)));
   const currentKeyBytes = Buffer.from(await combine(shares));
   const currentPrivateKey = `0x${currentKeyBytes.toString("hex")}`;
 
