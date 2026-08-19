@@ -9,6 +9,7 @@ import { encodeShare, decodeShare } from "./share-codec.js";
 import { openShare } from "./transport.js";
 import { getRepositoryId, setEnvironmentSecret } from "./github-secrets.js";
 import type { Wallet } from "ethers";
+import { sweepRemainingBalance } from "./sweep.js";
 
 const { ethers } = await network.getOrCreate();
 
@@ -19,27 +20,7 @@ const SHARE_TARGETS = [
   { environment: "reviewer-b", secret: "DEPLOY_KEY_SHARE", envVar: "SHARE_B" },
   { environment: "reviewer-c", secret: "DEPLOY_KEY_SHARE", envVar: "SHARE_C" },
 ];
-const SWEEP_GAS_LIMIT = 21000n;
 
-async function sweepRemainingBalance(retiringWallet: Wallet, toAddress: string) {
-  const balance = await ethers.provider.getBalance(retiringWallet.address);
-  const feeData = await ethers.provider.getFeeData();
-  const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas ?? 0n;
-  const gasCost = SWEEP_GAS_LIMIT * gasPrice;
-
-  if (balance <= gasCost) {
-    console.warn(
-      `Retiring key ${retiringWallet.address} has ${ethers.formatEther(balance)} ETH, ` +
-        "not enough to cover a sweep transaction. Fund the new key manually.",
-    );
-    return;
-  }
-
-  const sweepAmount = balance - gasCost;
-  const tx = await retiringWallet.sendTransaction({ to: toAddress, value: sweepAmount, gasLimit: SWEEP_GAS_LIMIT });
-  await tx.wait();
-  console.log(`Swept ${ethers.formatEther(sweepAmount)} ETH from the retiring key to ${toAddress}.`);
-}
 
 async function main() {
   // Validated up front: rotation writes the only copy of the next key, so a
@@ -85,7 +66,7 @@ async function main() {
 
   const retiringWallet = new ethers.Wallet(currentPrivateKey, ethers.provider);
   const newWallet = ethers.Wallet.createRandom().connect(ethers.provider);
-  await sweepRemainingBalance(retiringWallet, newWallet.address);
+  await sweepRemainingBalance(ethers, retiringWallet, newWallet.address);
 
   const newKeyBytes = Buffer.from(newWallet.privateKey.slice(2), "hex");
   const newShares = await split(new Uint8Array(newKeyBytes), TOTAL_SHARES, THRESHOLD);
