@@ -1,0 +1,38 @@
+{
+  "name": "ceremony-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "hardhat compile",
+    "typecheck": "tsc --noEmit",
+    "test": "hardhat test",
+    "coverage": "hardhat test --coverage",
+    "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
+    "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
+    "monitor:sepolia": "hardhat run scripts/monitor.ts --network sepolia",
+    "monitor:local": "hardhat run scripts/monitor.ts --network hardhat",
+    "ceremony:bootstrap": "hardhat run scripts/ceremony/bootstrap.ts --network hardhat",
+    "ceremony:deploy": "hardhat run scripts/ceremony/orchestrate.ts --network sepolia",
+    "ceremony:audit": "hardhat run scripts/ceremony/audit.ts --network hardhat"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
+    "@nomicfoundation/hardhat-verify": "^3.0.22",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.3",
+    "chai": "^5.1.2",
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0",
+    "hardhat": "^3.13.0",
+    "libsodium-wrappers": "^0.8.4",
+    "mocha": "^11.0.0",
+    "shamir-secret-sharing": "^0.0.4",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "ws": "8.21.3",
+    "serialize-javascript": "^7.1.0"
+  }
+}

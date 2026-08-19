@@ -1,0 +1,64 @@
+name: pages
+
+# Builds and publishes the frontend to GitHub Pages.
+# VITE_DAO_ADDRESS and VITE_TOKEN_ADDRESS come from the DAO_ADDRESS and
+# TOKEN_ADDRESS repo variables, which are set once a real ceremony deploy exists.
+# Before that the build still succeeds. The deployed page then shows the app's
+# own "missing config" error instead of a blank screen.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Build
+        run: npm run build
+        env:
+          VITE_DAO_ADDRESS: ${{ vars.DAO_ADDRESS }}
+          VITE_TOKEN_ADDRESS: ${{ vars.TOKEN_ADDRESS }}
+          VITE_CHAIN_ID: ${{ vars.CHAIN_ID }}
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

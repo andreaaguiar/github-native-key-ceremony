@@ -1,0 +1,11 @@
+node_modules/
+.env
+dist/
+artifacts/
+cache/
+typechain-types/
+types/
+coverage/
+coverage.json
+deployments/
+.devcontainer/
