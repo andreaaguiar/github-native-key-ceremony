@@ -11,6 +11,7 @@
 //
 // Runs on a bare runner with no dependencies: Node's own crypto only.
 import { constants, publicEncrypt } from "node:crypto";
+import { readPem } from "./pem.mjs";
 
 const share = process.env.DEPLOY_KEY_SHARE;
 const publicKeyB64 = process.env.CEREMONY_TRANSPORT_PUBLIC_KEY;
@@ -24,10 +25,11 @@ if (!publicKeyB64) {
   process.exit(1);
 }
 
-// The variable holds a PEM, base64-wrapped so it fits on one line.
-const publicKey = Buffer.from(publicKeyB64, "base64").toString("utf8");
-if (!publicKey.includes("BEGIN PUBLIC KEY")) {
-  console.error("CEREMONY_TRANSPORT_PUBLIC_KEY is not a base64-wrapped PEM public key.");
+let publicKey;
+try {
+  publicKey = readPem(publicKeyB64, "PUBLIC", "CEREMONY_TRANSPORT_PUBLIC_KEY");
+} catch (err) {
+  console.error(err.message);
   process.exit(1);
 }
 

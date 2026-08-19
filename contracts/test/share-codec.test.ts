@@ -79,8 +79,50 @@ describe("ceremony share wiring", () => {
       expect(() => openShare(sealed, keys().priv)).to.throw();
     });
 
-    it("rejects a private key that is not a base64-wrapped PEM", () => {
-      expect(() => openShare("Zm9v", Buffer.from("nope").toString("base64"))).to.throw(/not a base64-wrapped PEM/);
+    it("accepts the private key as a raw PEM as well as base64-wrapped", async () => {
+      const secret = new Uint8Array(randomBytes(32));
+      const shares = await split(secret, 3, 2);
+      const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+        modulusLength: 3072,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      });
+      const pub = Buffer.from(publicKey).toString("base64");
+      const sealed = [0, 1].map((i) => seal(encodeShare(shares[i]), pub));
+
+      for (const form of [privateKey, Buffer.from(privateKey).toString("base64")]) {
+        const opened = sealed.map((c) => decodeShare(openShare(c, form)));
+        expect(Buffer.from(await combine(opened))).to.deep.equal(Buffer.from(secret));
+      }
+    });
+
+    it("names the mistake when the public half is pasted into the private secret", () => {
+      const { publicKey } = generateKeyPairSync("rsa", {
+        modulusLength: 3072,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      });
+      expect(() => openShare("Zm9v", Buffer.from(publicKey).toString("base64"))).to.throw(
+        /pasted the public half into the private secret/,
+      );
+    });
+
+    it("says the value is truncated when it decodes to no PEM at all", () => {
+      expect(() => openShare("Zm9v", Buffer.from("not a key").toString("base64"))).to.throw(
+        /truncated or not base64/,
+      );
+    });
+
+    it("reports an empty private key plainly", () => {
+      expect(() => openShare("Zm9v", "")).to.throw(/is empty/);
+    });
+
+    it("explains a mismatched keypair rather than leaking a crypto error", async () => {
+      const [share] = await split(new Uint8Array(randomBytes(32)), 3, 2);
+      const a = keys();
+      const b = keys();
+      const sealed = seal(encodeShare(share), a.pub);
+      expect(() => openShare(sealed, b.priv)).to.throw(/set BOTH halves from the same run/);
     });
 
     it("fails when the reviewer environment has no share", () => {
