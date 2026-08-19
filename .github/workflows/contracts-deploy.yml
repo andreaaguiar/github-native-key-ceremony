@@ -144,9 +144,34 @@ jobs:
           DEPLOY_KEY_SHARE: ${{ secrets.DEPLOY_KEY_SHARE }}
           CEREMONY_TRANSPORT_PUBLIC_KEY: ${{ vars.CEREMONY_TRANSPORT_PUBLIC_KEY }}
 
+  freeze-gate-ab:
+    name: freeze gate — A+B
+    # Becomes eligible only once A+B have both approved, because `needs` waits
+    # for a terminal state. It never names reviewer-c, so it does not reintroduce the
+    # silence-blocks problem that one shared gate job would.
+    #
+    # This makes the post-approval kill switch visible in the run graph. The deploy
+    # job checks CEREMONY_FREEZE again as its first step: this job can only read
+    # the variable when it starts, and the deploy job starts seconds later, so the
+    # step is what guarantees the last possible check before a key is rebuilt.
+    needs: [entry-check, reviewer-a, reviewer-b]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse to proceed while frozen
+        env:
+          FREEZE_REASON: ${{ vars.CEREMONY_FREEZE }}
+        run: |
+          if [ -n "$FREEZE_REASON" ]; then
+            echo "Ceremony frozen after approval: $FREEZE_REASON"
+            echo "No key was reconstructed and no share was rotated."
+            exit 1
+          fi
+          echo "Not frozen; A+B may deploy."
+
   deploy-ab:
     name: sepolia (ceremony) — A+B
-    needs: [entry-check, reviewer-a, reviewer-b]
+    needs: [entry-check, reviewer-a, reviewer-b, freeze-gate-ab]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when A+B both approved — and it never
     # references reviewer-c, so it does not wait for that reviewer at all. That is
@@ -184,9 +209,34 @@ jobs:
           # Read when this job starts, so it reflects a freeze set after approval.
           ceremony-freeze: ${{ vars.CEREMONY_FREEZE }}
 
+  freeze-gate-ac:
+    name: freeze gate — A+C
+    # Becomes eligible only once A+C have both approved, because `needs` waits
+    # for a terminal state. It never names reviewer-b, so it does not reintroduce the
+    # silence-blocks problem that one shared gate job would.
+    #
+    # This makes the post-approval kill switch visible in the run graph. The deploy
+    # job checks CEREMONY_FREEZE again as its first step: this job can only read
+    # the variable when it starts, and the deploy job starts seconds later, so the
+    # step is what guarantees the last possible check before a key is rebuilt.
+    needs: [entry-check, reviewer-a, reviewer-c]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse to proceed while frozen
+        env:
+          FREEZE_REASON: ${{ vars.CEREMONY_FREEZE }}
+        run: |
+          if [ -n "$FREEZE_REASON" ]; then
+            echo "Ceremony frozen after approval: $FREEZE_REASON"
+            echo "No key was reconstructed and no share was rotated."
+            exit 1
+          fi
+          echo "Not frozen; A+C may deploy."
+
   deploy-ac:
     name: sepolia (ceremony) — A+C
-    needs: [entry-check, reviewer-a, reviewer-c]
+    needs: [entry-check, reviewer-a, reviewer-c, freeze-gate-ac]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when A+C both approved — and it never
     # references reviewer-b, so it does not wait for that reviewer at all. That is
@@ -224,9 +274,34 @@ jobs:
           # Read when this job starts, so it reflects a freeze set after approval.
           ceremony-freeze: ${{ vars.CEREMONY_FREEZE }}
 
+  freeze-gate-bc:
+    name: freeze gate — B+C
+    # Becomes eligible only once B+C have both approved, because `needs` waits
+    # for a terminal state. It never names reviewer-a, so it does not reintroduce the
+    # silence-blocks problem that one shared gate job would.
+    #
+    # This makes the post-approval kill switch visible in the run graph. The deploy
+    # job checks CEREMONY_FREEZE again as its first step: this job can only read
+    # the variable when it starts, and the deploy job starts seconds later, so the
+    # step is what guarantees the last possible check before a key is rebuilt.
+    needs: [entry-check, reviewer-b, reviewer-c]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse to proceed while frozen
+        env:
+          FREEZE_REASON: ${{ vars.CEREMONY_FREEZE }}
+        run: |
+          if [ -n "$FREEZE_REASON" ]; then
+            echo "Ceremony frozen after approval: $FREEZE_REASON"
+            echo "No key was reconstructed and no share was rotated."
+            exit 1
+          fi
+          echo "Not frozen; B+C may deploy."
+
   deploy-bc:
     name: sepolia (ceremony) — B+C
-    needs: [entry-check, reviewer-b, reviewer-c]
+    needs: [entry-check, reviewer-b, reviewer-c, freeze-gate-bc]
     # No `if:` threshold here. A job is skipped when any of its `needs` did not
     # succeed, so this runs exactly when B+C both approved — and it never
     # references reviewer-a, so it does not wait for that reviewer at all. That is
