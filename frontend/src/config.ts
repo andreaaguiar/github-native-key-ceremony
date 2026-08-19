@@ -16,9 +16,14 @@ function requireAddress(name: string, value: string | undefined): string {
   }
 }
 
+const SEPOLIA_CHAIN_ID = "11155111";
+
 function requireChainId(value: string | undefined): number {
-  // Defaults to Sepolia; validated so a bad override doesn't parse to NaN.
-  const n = parseInt(value ?? "11155111", 10);
+  // An unset repo variable reaches the build as an empty string, not undefined,
+  // so `??` alone never reaches the default. Treat blank as absent.
+  const raw = (value ?? "").trim() || SEPOLIA_CHAIN_ID;
+  // Number() rather than parseInt(): parseInt("123abc") silently yields 123.
+  const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) {
     throw new Error(`VITE_CHAIN_ID must be a positive integer chain id; got "${value}".`);
   }
